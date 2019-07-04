@@ -1,0 +1,30 @@
+Script started on Thu Jan  3 09:52:52 2019
+(B[mbash: /usr/local/bin/virtualenvwrapper.sh: No such file or directory
+bash: update_terminal_cwd: command not found
+[?1034h]0;~/Desktop/sy19_tp7/scripts[1m
+[38;5;166mSIMON[97m at [38;5;136mmacbook-pro-de-laurent[97m in [38;5;64m~/Desktop/sy19_tp7/scripts[97m on [38;5;61mmaster[38;5;33m [?]
+[97m$ (B[mls
+astro.Rmd  mais.Rmd   typescript
+bash: update_terminal_cwd: command not found
+]0;~/Desktop/sy19_tp7/scripts[1m
+[38;5;166mSIMON[97m at [38;5;136mmacbook-pro-de-laurent[97m in [38;5;64m~/Desktop/sy19_tp7/scripts[97m on [38;5;61mmaster[38;5;33m [?]
+[97m$ (B[mcd ;[K..l[K[K[K[K[K[Kls ..
+[34mdoc[39;49m[0m     [34mscripts[39;49m[0m
+bash: update_terminal_cwd: command not found
+]0;~/Desktop/sy19_tp7/scripts[1m
+[38;5;166mSIMON[97m at [38;5;136mmacbook-pro-de-laurent[97m in [38;5;64m~/Desktop/sy19_tp7/scripts[97m on [38;5;61mmaster[38;5;33m [?]
+[97m$ (B[mls ../
+[34mdoc[39;49m[0m     [34mscripts[39;49m[0m
+bash: update_terminal_cwd: command not found
+]0;~/Desktop/sy19_tp7/scripts[1m
+[38;5;166mSIMON[97m at [38;5;136mmacbook-pro-de-laurent[97m in [38;5;64m~/Desktop/sy19_tp7/scripts[97m on [38;5;61mmaster[38;5;33m [?]
+[97m$ (B[mcd ..
+bash: update_terminal_cwd: command not found
+]0;~/Desktop/sy19_tp7[1m
+[38;5;166mSIMON[97m at [38;5;136mmacbook-pro-de-laurent[97m in [38;5;64m~/Desktop/sy19_tp7[97m on [38;5;61mmaster[38;5;33m [?]
+[97m$ (B[mls
+[34mdoc[39;49m[0m     [34mscripts[39;49m[0m
+bash: update_terminal_cwd: command not found
+]0;~/Desktop/sy19_tp7[1m
+[38;5;166mSIMON[97m at [38;5;136mmacbook-pro-de-laurent[97m in [38;5;64m~/Desktop/sy19_tp7[97m on [38;5;61mmaster[38;5;33m [?]
+[97m$ (B[m

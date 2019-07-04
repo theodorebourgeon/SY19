@@ -1,0 +1,115 @@
+---
+title: "SY19 - A18"
+subtitle : "TP 6: Arbres de decision, methodes d’ensemble, bootstrap"
+output: html_notebook
+---
+
+#Exercice 1
+```{r}
+spam <- read.table("Spam-20181129/spambase.dat")
+spam$V58 <- factor(spam$V58) 
+index <- sample(nrow(spam), 2*nrow(spam)/3)
+train <- spam[index,]
+test <- spam[-index,]
+```
+
+```{r}
+library('tree')
+tree <- tree(V58~., data = train, control = tree.control(nrow(train), minsize = 5, mindev = 0))
+plot(tree)
+```
+On utilise control = tree.control pour forcer le developpement de l'arbre 
+summary(tree) donne : 
+  Nombre de feuilles = nb de noeud terminaux 
+  Le nb de variable utilise 
+  Deviance residuel (critere de purete) --> Critere de ginni ici 
+
+Mieux vaut utiliser Rpart --> plus tard 
+
+##Prediction
+```{r}
+predict <- predict(tree, newdata = test, type = 'class')
+table(test$V58, predict)
+1-mean(test$V58==predict)
+```
+
+
+##Validation par CV
+```{r}
+cv.tree <- cv.tree(tree)
+plot(cv.tree)
+cv.tree$size[which.min(cv.tree$dev)]
+```
+
+##Elagage
+```{r}
+prune.spam = prune.misclass(tree, best = 23)
+plot(prune.spam)
+text(prune.spam, pretty = 0)
+```
+
+##Prediction apres elaguage
+```{r}
+predict <- predict(prune.spam, newdata = test, type = 'class')
+table(test$V58, predict)
+1-mean(test$V58==predict)
+```
+
+##Bagging + foret aleatoire
+
+Juste bagging 
+```{r}
+library(randomForest)
+forest <- randomForest(V58~., data = train, mtry = 57)
+predict <- predict(forest, newdata = test, type = 'response')
+table(test$V58, predict)
+1-mean(test$V58==predict)
+```
+
+```{r}
+library(randomForest)
+m <- c(3,4,5,6,7,8,9,10,11)
+for (i in m){
+  forest <- randomForest(V58~., data = train, mtry = m)
+  predict <- predict(forest, newdata = test, type = 'response')
+  table(test$V58, predict)
+  print(1-mean(test$V58==predict))
+}
+
+
+```
+
+#Exercice 2
+
+```{r}
+prostate <- read.table("Prostate-20181129/prostate.data")
+```
+
+```{r}
+N <- 100
+B <- 10000
+p <- ncol(prostate)
+M <- zeros(B,p+1)
+
+
+for (m in 1:B){
+  xi <- sample(1:nrow(prostate) ,N , replace = TRUE)
+  x_train <- prostate[xi,]
+  x_test <- prostate[-xi,]
+  lm <- lm(lpsa~., data = x_train) 
+  
+  
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+

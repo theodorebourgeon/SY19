@@ -1,0 +1,274 @@
+---
+title: "TD7 - EM"
+author: "Bourgeon Theodore"
+output: html_notebook
+---
+
+##Exercice 1
+X(X1,.....,Xn) iid --> loi normale N(u,o) + Loi uniforme U([-a;a])
+
+###Question 1
+Generation d'un echantillon de taille n= 10 pour unr valeur Teta fixe
+
+
+Ce modele permet de gerer les valeurs aberantes automatiquement.
+
+Em va permettre de resoudre numeriquement ce type de probleme ou une variable n'est pas reelelemtn connue (VARIABLE CACHE), ici c'est la provenance du x, est-ce une gaussienne ou une loie uniforme. 
+
+
+```{r}
+n=100
+a = 5
+c= 1/(2*a)
+
+teta = 10
+mu = 0
+sigma = 1
+pi = 0.9 
+
+prop = rbinom(n, 1, pi)
+prop
+```
+Dans un premier temps on genere la proportion de variables qui vont etre generer par loi normale et loi uniforme. Pour cela, tirage aleatoire de bernouilli. Ici 90% vont etre generee par une varibale normale et 10% par unirfome, ces 10% correspondent aux valeurs aberantes qu'on veut generer.
+
+
+ifelse() = for et if en une seule fois, parcours tableau et fonctionne comme un ternaire. 
+```{r}
+x <- ifelse(prop == 1, rnorm(n, mu, sigma), runif(n, -a, a))
+```
+x <- y * rnorm(n, mu, sigma)  + (1-y) * runif(n, -a, a) Fonctionne de la meme maniere 
+
+Diagramme en boite
+```{r}
+boxplot(x)
+```
+Typiquement, la presence des valeurs aberantes est du au melange. Si on avait qu'une loi normale, on n'aurait pas ces valeurs. Ainsi pour faire de l'apprentissage en se basant sur une loi normale, il faut pas de valeur aberante. EM va permettre de les corriger. 
+
+
+Recherche des valeurs aberantes
+```{r}
+which(x < -4)
+x[which(x < -4)]
+prop[which(x < -4)]
+```
+On verifie ainsi que ces valeurs aberantes proviennents bien de la loi uniforme. 
+
+###Question 2
+####Algortihme de EM 
+Explication EM calculs
+
+#####E-step
+1. On veut maximiser log(p(x)), on suppose qu'on connait y pour simplifier le fonctionnement. Pour cela, on remplace y par son esperance. Du plus on fixe son teta pour estimer les y. 
+2. comme on suppose iid --> produit
+3. On developpe esperance
+4. On se fixe un indice i et on developpe la fonction de densite en utilisant les proba conditionneles. Puis log et esperances (on calcul un terme de la somme)
+5. qi c'est le parametre du bernouilli
+
+#####M-step
+1. On cherche a maximiser l'expression (derivation par rapport a pi, mu et sigma)
+
+###Question 3
+dunif(x,-a,a) = c dans un cas plus general
+```{r}
+mum = 9
+sigmam = 8
+pim = 0.2
+tol = 1e-200
+qim <- rep(1,n)
+it = 0 
+
+while (TRUE){
+  it = it + 1 
+  qi <- qim
+  qim = (dnorm(x,mum,sigmam)*pim) / (dnorm(x,mum,sigmam)*pim + (1-pim)*dunif(x,-a,a))
+  
+  if (mean((qi-qim)^2) < tol)
+    break
+  
+  pim = mean(qim)
+  mum = sum(qim*x)/sum(qim)
+  sigmam = sqrt((sum(qim*(x-mum)^2))/sum(qim))
+}
+mum
+sigmam
+pim
+it
+```
+
+
+####Estimation naive
+Estimation naive (sans prendre en compte les valeurs aberantes), comme si les valeurs etaient une loi uniforme parfaite. 
+```{r}
+mean(x)
+sd(x)
+```
+Em arrive bien a retrouver le vrai ecart type par rapport a l'estimation naive 
+
+####Trace probabilite estimees, 1-yi en fonction xi
+
+```{r}
+plot(x, 1-qi)
+```
+C'est la probabilite que la valeur soit aberantes (i.e issue de la loie uniforme) --> plus on s'eloigne de l'esperance, plus la proba est forte.
+
+###Question 4
+```{r}
+loglikminus <- function(theta){
+  mum <- theta[1]
+  sigmam <- theta[2]
+  pim <- theta[3]
+  -sum(log(dnorm(x, mum, sigmam) * pim + (1 - pim) * dunif(x, -a, a)))
+}
+```
+
+On veut l'optimiser : optim()
+
+```{r}
+optim(c(2, 2, 0.6), loglikminus)
+```
+
+Minus car optim minimise les differents problemes. Mais ne garantie pas que c'est un minimum global. De plus cela foncitonne uniquement car les dimensions sont faibles.
+
+
+
+##Exercice 2
+
+###WINE
+```{r}
+library(mclust)
+data <- read.table("Wine-20181122/wine.txt")
+data
+Y <- data[-1]
+head(Y)
+```
+
+Package Mclust : 
+
+ - data 
+ - G : nombre de melange
+ - modelNames : on peut tester des modeles differents
+ 
+```{r}
+res <- Mclust(data = Y,  G = 3, modelNames = "EII")
+res
+```
+res$G = meilleur melange 
+res$classification = quelles sont les classes obtenues ici 
+```{r}
+res$G
+res$classification
+```
+```{r}
+data$V1
+```
+Difficiel de comparer les deux, choix du label independant. 
+On utilise adjustedRandIndex pour savoir si des classifications sont proches ou pas 
+```{r}
+adjustedRandIndex(res$classification, data$V1)
+```
+Cet indice est inferieur a 1. PLus on se rapporche de 1, plus elles sont egales. (si =1, elles sont egales aux labels pres)
+Ici c'est pas terrible.
+
+On ne se restreind pas sur le modele
+```{r}
+res <- Mclust(data = Y,  G = 3)
+res
+res$classification
+data$V1
+adjustedRandIndex(res$classification, data$V1)
+res$modelName
+```
+Si on a pas le nombnre de melange, on se base sur la complexite du modele par un Bic et le nombre de gaussienne. Ici on a des donnees de classes donc on est plus precis.
+Ici le meilleur modele est : ellipsoidale avec la meme orientation.
+
+Independant du label 
+```{r}
+clas <- c("a", "b", "c")[res$classification]
+clas
+adjustedRandIndex(clas, data$V1)
+```
+
+On retrouve la meme valeur. L'index de rand marche aussi si le nombre d'ensemble dans 2 partitions sont differents 
+```{r}
+res <- Mclust(data = Y, G = 4)
+adjustedRandIndex(res$classification, data$V1)
+```
+```{r}
+plot(res, what = "BIC")
+```
+
+```{r}
+res <- Mclust(data = Y)
+plot(res, what = "BIC")
+plot(res, what = "classification")
+plot(res, what = "density")
+```
+
+###SEEDS
+
+```{r}
+library(mclust)
+data <- read.table("Seeds-20181122/seeds.txt")
+head(data)
+Y <- data[-8]
+head(Y)
+```
+
+```{r}
+res <- Mclust(Y)
+res$classification
+adjustedRandIndex(res$classification, data$V8)
+```
+```{r}
+summary(res)
+```
+
+
+```{r}
+res <- Mclust(Y, modelNames = "EEV")
+plot(res, what = "BIC")
+plot(res, what = "classification")
+plot(res, what = "density")
+```
+
+On a 3 classes en vrai mais on aurait besoin de 4 classes pour mieux decrire le jeu de donn??e
+```{r}
+res <- Mclust(Y, G = 3)
+res$classification
+adjustedRandIndex(res$classification, data$V8)
+```
+
+```{r}
+summary(res)
+```
+
+###E.COLI
+
+```{r}
+library(mclust)
+data <- read.table("E.coli-20181122/ecoli.txt")
+head(data)
+Y <- data[-1]
+Y <- Y[-8]
+head(Y)
+```
+
+```{r}
+res <- Mclust(Y)
+res$G
+res$modelName
+res$classification
+adjustedRandIndex(res$classification, data$V9)
+
+```
+
+```{r}
+plot(res, what = "BIC")
+plot(res, what = "classification")
+plot(res, what = "density")
+```
+Si on regarde la matrice de variance co-variance des variable 4 et 5, elles devraient etre toute petite 
+```{r}
+data$V4
+```
+

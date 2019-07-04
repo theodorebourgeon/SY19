@@ -1,0 +1,256 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+library('FNN')
+library('MASS')
+library('leaps')
+library('glmnet')
+library(corrplot)
+library(MASS)
+library(pROC)
+library(e1071)
+library(ggplot2)
+library(factoextra)
+library(FNN)
+library(mclust)
+library("kernlab")
+library(randomForest)
+```
+Objectifs du TP :L???objectif de ce TP est de nous familiariser avec la notion d???arbre de d??cison ainsi que les m??thodes de bagging, for??ts et boosting. Nous aborderons ??galement une m??thode performante mais difficilement interpr??table : les Support Vector Machines (SVM).
+
+1. Reconnaissance de plan??te.
+
+Dans un premier temps nous commencons par regarder notre dataset astronomy afin de se donner des id????s de sa structure.Le but de ce dataset est de construire un predicteur capable de d??terminer le type d'une plan??te parmis trois propositions. 
+```{r}
+#ASTRONOMY DATASET 
+astro <- read.csv("../Datas/astronomy_train.csv",sep=",")
+
+#Get a head on the data set
+head(astro,10) #It will be a classification problem with 3 responses
+dim(astro) #View predictors and many lines
+
+#Get an eye on it
+plot(astro[,1:5],col = c("red","blue","green")[as.numeric(astro$class)]) 
+boxplot(astro$ra ~ astro$class)
+
+#Statistical analysis
+summary(astro)
+```
+Puis nous pr??parons d??s le d??but notre dataset afin de pouvoir effectuer un apprentissage dessus en s??parant le jeu de donn??es en 2/3 et 1/3 gr??ce ?? la fonction sample(). 
+```{r}
+#Dataset preparation
+levels(astro[,"class"]) <- c(0, 1, 2)
+levels(astro[,"class"]) <- as.numeric(levels(astro[,"class"])) 
+
+astro <- astro[,c(-1, -10)] # Drop constant variables
+classloc <- which.max(colnames(astro) == "class") #location of "class" column
+
+n <- nrow(astro) #5000
+p <- ncol(astro) #16
+
+#select random rows from a table
+train <- sample(1:n, size = floor(2*n/3))
+#Training dataset
+astro.train <- astro[train, ]
+#Testing dataset
+astro.test <- astro[-train, ]
+
+
+Xapp <- as.matrix(astro.train[, -classloc])
+Yapp <- as.matrix(astro.train[, classloc])
+napp <- length(Yapp)
+
+
+Xtst <- astro.test[, -classloc]
+Ytst <- astro.test[, classloc]
+ntst <- length(Ytst)
+```
+
+Au regard des pr??c??dents plots, nous r??alisons que certainnes variables semblent corr??l??es. Afin de v??rifier cela nous faisons appel ?? la matrice des corr??lations que nous plotons. Nous constatons sur le graphique que des variables sont tr??s corr??l??es. Ainsi nous r??alisons une ACP sur notre dataset afin de r??duire le nombre de variables. Apr??s analyse de notre ACP nous r??alisons que plus de 90% de l'information de notre dataset est contenu dans 6 ?? 9 variables.
+```{r}
+#Preprocessing
+
+#correlation matrix
+mcor<-cor(Xapp)
+corrplot::corrplot(mcor,type="upper",order="hclust",tl.col="black",tl.srt=45)
+
+#ACP
+pca <- prcomp(Xapp,scale=TRUE)
+
+#number of principal components
+vars <- apply(pca$x,2,var)
+props <- vars / sum(vars)
+cumsum(props)
+
+#Alternative method (pincomp)
+xapp2 <- scale(Xapp)
+pca2 <- princomp(xapp2)
+z <- pca2$scores
+lambda <- pca2$sdev^2
+
+plot(cumsum(props)*100,xlab='composante principale',ylab='% explique')
+lines(cumsum(lambda)/sum(lambda)*100,type='l',col='red')
+##pairs(z[,1:8],col=Yapp)
+
+#Accroding to ACP we can use between 6 and 8 components out of 15
+
+#PCR
+library(pls)
+pcr.fit <- pcr(Yapp~Xapp,data=astro.train,scale=TRUE,validation="CV")
+summary(pcr.fit)
+validationplot(pcr.fit,val.type = "MSEP")
+```
+Cependant avant d'utiliser nos nouvelles variables nous allons essayer d'effectuer un apprentissage sur l'ensemble de notre dataset. Nous allons comparer diff??rents classifieurs que nous r??sumerons apr??s.
+Nous attaquons par les Gaussian Mixture Model. 
+```{r}
+#GMM
+gmm <- MclustDA(astro.train,Yapp,modelType = "EDDA")
+gmm.pred <- predict(gmm,newdata=Xtst)
+perf(Ytst,gmm.pred$class,ntst)
+
+#Dimension reduction
+gmm.red <- MclustDR(gmm)
+```
+
+Puis nous attaquons la partie SVM. Pour cela nous utilisons la fonction svm() du package e1071, en faisant varier divers param??tres. En particulier,  on  fixera  les  param??tres  suivants  par  validation  crois??e  en  utilisant  la fonction tune() du m??me package 
+L???hyperparam??tre  cost  (correspondant  au  "C"  dans  la  formule  de  Lagrange)  quipr??cise le co??t d???une violation de la marge. Lorsque cost est petit, les marges se-ront d???autant plus larges et de nombreux Support Vector chevaucheront les marges. Lorsque que cost est grand, les marges seront ??troites et peu de Support Vector d??-passeront les marges.
+Le param??tre du noyau kernel, qui d??finit le type parmi : linear, polynomial, radialbasis et sigmoid.
+Apr??s plusieurs essais nous obtenons un taux d'erreur extremement faible 0.8%. Cependant cette m??thode reste difficilement interpr??table.
+```{r}
+#SVM
+
+CC<-c(0.01,0.1,1,10,100,1000)
+N<-length(CC)
+err<-rep(0,N)
+for(i in 1:N) {
+  err[i]<-cross(ksvm(astro.train$class~ ., data = astro.train,kernel = "polydot", type="C-svc", C=CC[i], cross=5))
+}
+plot(CC,err,type="b",log="x",xlab="C",ylab="CV error")
+
+svm_astro <- ksvm(astro.train$class~ ., data = astro.train, kernel = "polydot", cross = 5, type="C-svc", C=1000)
+pred.svm <- predict(svmfit, newdata = Xtst)
+perf(Ytst, pred.svm, ntst)
+```
+
+Nous d??cidons donc de tester d'autres m??thodes plus interpr??tables.
+```{r}
+##### Multinomial regression
+library(nnet)
+multinom.astro<-multinom(class~.,data=astro.train)
+multinom.pred<-predict(multinom.astro,newdata=Xtst)
+perf(Ytst, multinom.pred, ntst)
+##### End Multinomial regression
+```
+
+```{r}
+##### Random Forest
+# Decision trees with or without bagging should always have lower performance than random forests, that's why i'm not testing them
+randomForest.fit<-randomForest(class~.,data=astro.train)
+randomForest.pred=predict(randomForest.fit,newdata=Xtst,type='class')
+perf(Ytst, randomForest.pred, ntst)
+#### End Random Forest
+```
+
+
+```{r}
+# Bagging
+bag.astro <- randomForest(astro.train$class~.,data=astro.train,ntree=1000,mtry=8)
+yhat.bag<-predict(bag.astro,newdata=Xtst,type='class')
+perf(Ytst,yhat.bag,ntst)
+
+```
+
+Nous r??alisons ici que les arbres offrent un bon taux d'erreur de 1%. Alors une question se pose, vaut-il mieux privil??gier dans ce cas l'interpr??tabilit?? par rapport au taux d'erreur ? Tout d??pend de l'utilisation faite derri??re gr??ce ?? ces donn??es. Dans notre cas, avec 0.02% d'??cart avec le SVM par rapport au arbres optimis??s par du bagging, nous pouvons ??tre tent?? de prendre la m??thode de bagging si l'utilisateur aura besoin de compr??hension. 
+En revanche pour la finalit?? du TP nous allons conserver le classifieur SVM. Par ailleurs, le taux ??tant bas, nous n'avons pas besoin d'utiliser nos variables issus de l'ACP. Nous acceptons le trade-off biai-variance. En effet le nombre de variables reste acceptable (15). 
+
+
+Bilan des m??thodes
+Nom m??thode || Taux d'erreur || Intervalle de confiance 95%
+  
+
+
+
+#-----------------------------------Je n'ai gard?? que la fonction de perf.
+
+# Comparing classics classifiers
+```{r}
+perf <- function(ztst, zpred, ntst) {
+  out <- array(0, c(1,3))
+  perf <- table(ztst, zpred)
+  out[1] <- 1-sum(diag(perf)/ntst) # tx erreur
+  out[2] <- out[1]-2*sqrt(out[1]*(1-out[1])/ntst) # intervalle de confiance ?? 0.95%
+  out[3] <- out[1]+2*sqrt(out[1]*(1-out[1])/ntst)
+  
+  out
+}
+
+Compare_classifieurs <- function(data, nfolds = 5) {
+  res <- NULL
+  res$lda <- array(0, c(nfolds,3))
+  res$qda <- array(0, c(nfolds,3))
+  res$glm <- array(0, c(nfolds,3))
+  res$nba <- array(0, c(nfolds,3))
+  res$knn <- array(0, c(nfolds,3))
+  
+  n <- nrow(data)
+  p <- ncol(data)
+  # S??paration de l'ensemble de test et d'apprentissage par cross-validation
+  folds=sample(1:nfolds,nrow(data),replace=TRUE)
+  #folds <- as.factor(rep(sample(1:nfolds, size = nfolds), n/nfolds))
+  for (i in 1:nfolds){
+    app <- data[folds!=i, ]
+    Xapp <- app[, -classloc]
+    zapp <- app[, classloc]
+    napp <- length(zapp)
+    tst <- data[folds==i, ]
+    Xtst <- tst[, -classloc]
+    ztst <- tst[, classloc]
+    ntst <- length(ztst)
+    
+    # LDA
+    lda.fit <- lda(class ~ ., data = app)
+    pred.lda <- predict(lda.fit, newdata = tst) # plot(roc(ztst, pred.lda$x))
+    res$lda[i,] <- perf(ztst, pred.lda$class, ntst)
+
+    # QDA
+    qda.fit <- qda(class ~ ., data = app)
+    pred.qda <- predict(qda.fit, newdata = tst) # plot(roc(ztst,) ) a demander au prof
+    res$qda[i,] <- perf(ztst, pred.qda$class, ntst)
+
+    
+    # GLM
+    glm.fit <- glm(class ~ ., data = app, family = "binomial")
+    pred.glm <- predict(glm.fit, newdata = Xtst, type = "response") # plot(roc(ztst, as.vector(pred.glm)), add = TRUE, col = "red")
+    res$glm[i,] <- perf(ztst, pred.glm>0.5, ntst)
+    
+    # NBA
+    nba.fit <- naiveBayes(Xapp, factor(zapp))
+    pred.nba <- predict(nba.fit, Xtst)
+    res$nba[i,] <- perf(ztst, pred.nba, ntst)
+    
+    # KNN
+    pred.knn <- knn(train=Xapp, test=Xtst, cl=zapp, k=120)
+    res$knn[i,] <- perf(ztst, pred.knn[1:length(ztst)], ntst)
+    
+  }
+  
+  res.mean <- NULL
+  res.mean$lda <- colMeans(res$lda)
+  res.mean$qda <- colMeans(res$qda)
+  res.mean$glm <- colMeans(res$glm)
+  res.mean$nba <- colMeans(res$nba[complete.cases(res$nba), ])
+  res.mean$knn <- colMeans(res$knn)
+
+  out <- data.frame(
+    Classifieur = c("LDA", "QDA", "GLM", "NBA", "KNN" ),
+    Erreur = c(res.mean$lda[1], res.mean$qda[1], res.mean$glm[1], res.mean$nba[1], res.mean$knn[1]),
+    BorneSup = c(res.mean$lda[2], res.mean$qda[2], res.mean$glm[2], res.mean$nba[2], res.mean$knn[2]),
+    BorneInf = c(res.mean$lda[3], res.mean$qda[3], res.mean$glm[3], res.mean$nba[3], res.mean$knn[3])
+  )
+  
+  out[order(out$Erreur),]
+}
+Compare_classifieurs(astro)
+```

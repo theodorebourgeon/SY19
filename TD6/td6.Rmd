@@ -1,0 +1,200 @@
+---
+title: "ST19 - TD6"
+author: "Theodore BOURGEON"
+output: html_notebook
+---
+#Exercice 1 
+
+##Donnees
+```{r}
+library(MASS)    
+data <- mcycle
+head(data)
+dim(data)
+names(data)
+```
+```{r}
+plot(data)
+```
+
+
+##Q1 - Regression polynomiale d'ordre p 
+
+###Graphique
+```{r}
+    model <- lm(accel~poly(times, degree = 3), data=data)
+    r <- range(mcycle$times)
+    times.plot <- seq(r[1], r[2], length.out = 100)
+    accel.plot <- predict(model, newdata = data.frame(times = times.plot))
+    plot(times.plot,accel.plot, type = "l")
+    points(mcycle)
+```
+
+##Q2 - Fonction de regression estimees pour differentes valeurs de p
+On verifie par CV, on parcours l'indice du tableau de degree, plus pratique pour CV
+
+```{r}
+n<- nrow(mcycle)
+K <- 10
+folds= sample(1:K,n, replace = TRUE)
+
+P <- 1:17
+N<- length(P)
+CV <- rep(0, N)
+
+for (i in 1:N){
+  p = P[i]
+  for (k in (1:K)){
+      train <- data[folds!=k,]
+      test <- data[folds==k,]
+      model <- lm(accel~poly(times, degree = p), data=train)
+      pred <- predict(model, newdata = test)
+      cv <- sum((test$accel - pred)^2)
+      CV[i] <- CV[i] + cv
+  }
+  CV[i] <- CV[i]/n
+}
+plot(P, CV)
+```
+
+
+###Conclusion
+degree = 15 semble un peu mieux 
+
+##Q3 - Spline cubiques naturelles
+
+```{r}
+    library(splines)
+    r <- range(mcycle$times)
+    times.plot <- seq(r[1], r[2], length.out = 100)
+    
+    model <- lm(accel~ns(times, df = 13), data=data)
+    pred <- predict(model, newdata = data.frame(times = times.plot))
+    plot(times.plot, pred, type = "l")
+    points(mcycle)
+```
+
+On verifie par CV : 
+```{r}
+n<- nrow(mcycle)
+K <- 5
+folds= sample(1:K,n, replace = TRUE)
+
+DF <- 1:50
+N <- length(DF)
+CV <- rep(0, N)
+
+for (i in 1:N){
+  df = DF[i]
+  for (k in 1:K){
+      train <- data[folds != k,]
+      test <- data[folds == k,]
+      model <- lm(accel~ns(times, df = df), data=train)
+      pred <- predict(model, newdata = test)
+      cv <- sum((test$accel - pred)^2)
+      CV[i] <- CV[i] + cv
+  }
+  CV[i] <- CV[i]/n
+}
+plot(DF, CV)
+```
+
+Pour avoir le filtre optimale 
+```{r}
+df_optimale <- DF[which.min(CV)]
+df_optimale
+```
+
+```{r}
+    library(splines)
+    r <- range(mcycle$times)
+    times.plot <- seq(r[1], r[2], length.out = 100)
+    
+    model <- lm(accel~ns(times, df = df_optimale), data=data)
+    pred <- predict(model, newdata = data.frame(times = times.plot))
+    plot(times.plot, pred, type = "l")
+    points(mcycle)
+```
+###Conclusion
+degree  de liberte = 9 est l'optimale pour K=5
+--> 8 degree de liberte 
+
+
+##Q3 - Splines lissees
+
+smooth.spline avec validation croisee deja integree
+
+```{r}
+ss <- smooth.spline(data$times, data$accel, cv = TRUE)
+ss
+ss$df
+```
+Degre de liberte fractionnaire 
+
+Discretisation
+```{r}
+r <- range(mcycle$times)
+times.plot <- seq(r[1], r[2], length.out = 100)
+```
+
+```{r}
+model <- smooth.spline(data$times, data$accel, df = df_optimale)
+pred <- predict(model, newdata = data.frame(times = times.plot))
+times.plot <- pred$x
+accel.plot <- pred$y
+plot(times.plot, accel.plot, type = "l")
+points(data)
+```
+Besoin de coinserver les valeurs x et y de pred car smooth.spline ne predit pas les doublons. Si on se base sur les x classiques il y aura un probleme de longueur possible si ya des doublons.
+
+
+
+**On peut difficilement comparer les modeles puisque CV K=5 pour les premiers et leave on out pour smooth spline. Meme procedure de validation = donnees comparable**
+
+```{r}
+n<- nrow(mcycle)
+K <- 5
+folds= sample(1:K,n, replace = TRUE)
+
+for (k in 1:K){
+    train <- data[folds != k,]
+    test <- data[folds == k,]
+    model <- smooth.spline(train$times, train$accel, df = df_optimale)
+    pred <- predict(model, newdata = test)
+    cv <- cv + sum((test$accel - pred$y)^2)
+}
+cv
+```
+
+#Exercice 2 
+
+```{r}
+library(gam)
+data("kyphosis")
+head(kyphosis)
+plot(kyphosis)
+```
+
+##Q1
+
+```{r}
+fit <- gam(Kyphosis~ns(Age, 2)+ns(Number, 2)+ns(Start, 2), family = "binomial", data = kyphosis, trace = TRUE)
+fit
+plot(fit, se = TRUE)
+```
+
+##Q2
+
+```{r}
+
+```
+
+##Q3
+
+```{r}
+
+```
+
+
+
+

@@ -1,0 +1,545 @@
+---
+title: "TP - SY19 - A19"
+subtitle: Rendement du mais
+output:
+  word_document: default
+  html_notebook: default
+---
+# Méthodologie 
+
+  * Données
+    * Extraction des données 
+    * Matrice de corrélation
+    
+  * Sélection de variables 
+    * Subset
+    * Régularisation 
+        * Ridge 
+        * Lasso 
+        * ElasticNet 
+    * Réduction de dimension 
+        * PCR
+      
+  * Modèle 
+      * Régression linéaire 
+      * KNN
+      * Régression multinoniale
+      * Spline
+      * SVR
+      * Neural Network
+        * NNET
+        * Keras
+
+#Données
+
+##Extraction des données 
+
+Les données concernent le rendement du maïs en France, dans les différents département sur plusieurs années. L'objectif est de prédire le rendement à partir de données climatiques. Il y a 2300 individus et 58 variables : 57 prédicteurs.On choisit dès à présent de supprimer la colonne X contenant un identifiant unique n'apportant pas d'informations particulières.
+
+```{r include=FALSE}
+data <- read.csv("../Data/mais_train.csv")
+names(data)
+head(data)
+dim(data)
+set.seed(5)
+boxplot(data$yield_anomaly)  
+data
+
+set.seed(5)
+index <- sample(nrow(data), 0.8*nrow(data))
+train <- data[index,]
+test <- data[-index,]
+
+y.train <- train[,3]
+ntrain <- length(train$yield_anomaly)
+ntest <- length(test$yield_anomaly)
+
+```
+
+On sépare les données en 80% de données d'entraînements et 20% de données de test de manière aléatoire. Par la suite nous évaluerons le MSE par validation croisée afin de pouvoir comparer les modèles en eux.
+
+## Estimation du modèle et des graphes de résidus
+
+```{r echo = FALSE}
+modlin=lm(yield_anomaly~., data)
+# Residus
+res=residuals(modlin)
+# Histograme et QQ plot 
+par(mfrow=c(1,3))
+hist(residuals(modlin))
+qqnorm(res)
+qqline(res, col = 2)
+# Residus
+plot(modlin$fitted.values,res, asp=1)
+```
+Les hypothèses du modèle lineaire ne semblent pas etre valable car les residus ne sont pas gaussiens (test de Shapiro-Wilk). Cependant dans le cas qu'un échantillon de grande taille, ce modèle reste robuste et peux convenir. C'est pour cela que nous le testons par la suite.
+
+
+##Matrice de correlation
+
+```{r echo=FALSE}
+library(corrplot)
+corrplot::corrplot(cor(data), type="upper", tl.col="black", tl.srt=45)
+```
+Dans un premier temps, nous nous sommes intéressés à la corrélation entre les variables explicatives et yield_anomaly. Si la plupart des corrélations sont plutôt faibles, on remarque des coefficients relativement forts entre certaines variables explicatives. 
+
+# Selection de variables 
+
+## Subset
+
+```{r include=FALSE}
+library(leaps)
+
+regsubset1 <- regsubsets(yield_anomaly~., data=data, method = "forward", nvmax = 57)
+#summary(regsubset1)
+plot(summary(regsubset1)$bic,xlab='Number of variables',ylab='BIC', type='l', main="forward")
+which.min(summary(regsubset1)$bic)
+#summary(regsubset1)$which[which.min(summary(regsubset1)$bic),-1]
+names(data)[summary(regsubset1)$which[which.min(summary(regsubset1)$bic),-1]]
+
+regsubset2 <- regsubsets(yield_anomaly~., data=data, method = "backward", nvmax = 57)
+#summary(regsubset2)
+plot(summary(regsubset2)$bic,xlab='Number of variables',ylab='BIC', type='l', main="backward")
+which.min(summary(regsubset2)$bic)
+#summary(regsubset2)$which[which.min(summary(regsubset2)$bic),-1]
+names(data)[summary(regsubset2)$which[which.min(summary(regsubset2)$bic),-1]]
+```
+On obtient donc les modeles suivant suite aux stepwise selection.
+
+```{r}
+models <- c(
+  yield_anomaly~.,
+  yield_anomaly~IRR+ETP_2+ETP_3+ETP_6+ETP_7+PR_4+PR_5+PR_6+PR_7+PR_8+PR_9+RV_2+RV_6+SeqPR_1+SeqPR_2+SeqPR_4+SeqPR_9+Tn_1+Tn_3+Tn_4+Tn_5+Tn_8+Tx_2+Tx_3+Tx_7,
+  yield_anomaly~ETP_2+ETP_3+ETP_6+ETP_7+ETP_8+PR_4+PR_5+PR_6+PR_7+PR_9+RV_2+RV_6+RV_7+RV_8+SeqPR_1+SeqPR_2+SeqPR_4+SeqPR_9+Tn_5+Tn_7+Tx_2+Tx_3+Tx_4+Tx_7
+)
+```
+
+
+## Regularisation
+On va utiliser la régularisation pour tenter d’aider le modèle à mieux généraliser sur les données de test. Sélection de la pénalité par validation croisée.
+
+### Ridge 
+```{r include=FALSE}
+#install.packages(c("glmnet", "Metrics"))
+library(glmnet)
+library(Metrics)
+
+for (m in (1:length(models))) {
+  x.train <- model.matrix(models[[m]], train)[,-1]
+  x.test <- model.matrix(models[[m]], test)[,-1]
+  cv.ridge <- cv.glmnet(x.train, y.train, alpha = 0.9)
+  plot(cv.ridge)
+  model.ridge <- glmnet(x.train, y.train, alpha = 0.9, lambda=cv.ridge$lambda.min)
+  pred.test <- predict(model.ridge,s=cv.ridge$lambda.min,newx=x.test)
+  
+  print(data.frame(
+      model = m,
+      lambda_min = cv.ridge$lambda.min,
+      mse_test = mse(pred.test, test$yield_anomaly)
+    ))
+}
+```
+
+### Lasso 
+```{r include=FALSE}
+library(glmnet)
+library(Metrics)
+
+for (m in (1:length(models))) {
+  x.train <- model.matrix(models[[m]], train)[,-1]
+  x.test <- model.matrix(models[[m]], test)[,-1]
+  cv.lasso <- cv.glmnet(x.train, y.train ,alpha = 1)
+  plot(cv.lasso)
+  model.lasso <- glmnet(x.train,y.train , alpha = 1, lambda=cv.lasso$lambda.min)
+  pred.test <- predict(model.lasso,s=cv.lasso$lambda.min,newx=x.test)
+  
+  print(data.frame(
+      model = m,
+      lambda_min = cv.lasso$lambda.min,
+      mse_test = mse(pred.test, test$yield_anomaly)
+    ))
+}
+```
+
+### ElasticNet 
+```{r include = FALSE}
+library(glmnet)
+library(Metrics)
+set.seed(4)
+alpha <- c(0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1)
+
+for (m in (1:length(models))) {
+  mse <- c()
+  for (i in alpha ){
+  x.train <- model.matrix(models[[m]], train)[,-1]
+  x.test <- model.matrix(models[[m]], test)[,-1]
+  
+  cv.elnet <- cv.glmnet(x.train, y.train , alpha = i)
+  model.elnet <- glmnet(x.train,y.train , lambda=cv.elnet$lambda.min, alpha = i)
+  pred.test <- predict(model.elnet,s=cv.elnet$lambda.min,newx=x.test)
+  mse <- cbind(mse, mse(pred.test, test$yield_anomaly))
+  #print(data.frame(
+  #    model = m,
+  #    lambda_min = cv.lasso$lambda.min,
+  #    mse_test = mse(pred.test, test$yield_anomaly)
+  #  ))
+  }
+  plot(alpha,mse, type = "l")
+}
+```
+
+Les figures représentent l’évolution du MSE sur le jeu de données en fonction du paramètre α pour les 3 modèles. On se propose de tester 3 régularisations différentes : le ridge (α = 0), le lasso (α = 1) et elasticnet dont la valeur de alpha est déterminé par CV pour chacun des modèles. Cela donne respectivement pour les modèles 1, 2 et 3 : alpha = 0, 0.1 et 0.9.
+
+On utilise le package glmnet sur les trois modèles étudiés précédemment. Les performances des 9 modèles résultants seront mesurées par le MSE.
+
+Le tableau récapitulatif des résultats est le suivant :
+
+| Model  | Variables | Ridge (alpha = 0) | Lasso (alpha = 1) | Elastic Net (0,0.1,0.9)|
+|--------|-----------|-------------------|-------------------|--------------------------|
+| 1      |    57     |0.7045976 | 0.7096448	| 0.7045976 |
+| 2      |    25     |0.7392032	| 0.7394032 | 0.7387808 | 
+| 3      |    24     |0.759878  | 0.7585088	| 0.7585774  |
+
+
+##Reduction de dimension 
+### PCR
+
+```{r echo=FALSE}
+library(pls)
+pcr_model <- pcr(yield_anomaly~., data = train,scale = TRUE, validation = "CV")
+validationplot(pcr_model, val.type="MSEP")
+```
+
+On constate que, d'après l'analyse en composante principale, pour détenir le plus d'informations il faut 57 composantes principales.
+
+```{r include = FALSE}
+pcr_pred <- predict(pcr_model, test, ncomp = 57)
+mean((pcr_pred - test[["yield_anomaly"]])^2)
+```
+
+Ainsi, on obtient : 
+
+| PRC         | Résultat  |
+|-------------|-----------|
+| Composante  |    57     |
+| MSE         | 0.7116193 |
+
+
+## Normalisation des données 
+
+Dans certains cas, normaliser les données peut améliorer les performances de modèles. Tous les tests effectués précédemment ont également été faits sur les données normalisée mais n’a apporté aucune amélioration. Pour une question de lisibilité, on n’a pas considéré nécessaire de rajouter ces résultats. Ceci sont prévisibles : la normalisation étant une simple transformation linéaire, la régression l’apprend au besoin.
+
+
+# Modèle
+
+## Régression linéaire
+
+```{r include=FALSE}
+#install.packages("caret")
+library(caret)
+for (m in (1:length(models))) {
+  model <- train(models[[m]], train ,method = "lm",trControl = trainControl(method = "repeatedcv", number = 10, repeats = 10))
+
+  predict <- predict(model, test)
+  error <- predict - test[["yield_anomaly"]]
+  MSE <- mean(error^2)
+  print(models[[m]])
+  print(MSE)
+}
+```
+
+| Model  | LM |
+|--------|-----------|
+| 1      |0.7137491 | 
+| 2      |0.7394938	| 
+| 3      |0.7586552 | 
+
+## KNN - Plus proche voisin 
+
+```{r include = FALSE}
+library(caret)
+
+
+for (m in (1:length(models))) {
+  model <- train(models[[m]], train ,method = "knn",trControl = trainControl(method = "repeatedcv", number = 10, repeats = 10))
+  predict <- predict(model, test)
+  error <- predict - test[["yield_anomaly"]]
+  MSE <- mean(error^2)
+  print(models[[m]])
+  print(MSE)
+}
+```
+
+| Model  | KNN (k=10) |
+|--------|-----------|
+| 1      |1.033251 | 
+| 2      |0.8369283	| 
+| 3      |0.830511 | 
+
+## Régression Multinoniale
+
+La régression multinoniale est assez limitée quant aux modèles mis en place, on se focalisera plus sur les splines, en particulier les modèles additifs. De plus le nombre de combinaison est trop grand, ce qui nous empêche de tester.
+```{r include = FALSE}
+#library(nnet)
+#for (m in (1:length(models))) {
+#  model<-multinom(models[[m]],data=train)
+#  pred<-predict(multinom,newdata=test)
+#  error <- predict - test[["yield_anomaly"]]
+#  MSE <- mean(error^2)
+#  print(models[[m]])
+#  print(MSE)
+#}
+```
+
+## Splines 
+
+Dans le cas d'un modèle multi-dimensionnel, les splines basiques, naturelles et smooth ne s'appliquent pas. On peut faire appel aux tensors mais la dimension croit exponentiellement et on perd cruellement en interpretabilité. Pour palier à ce problème, on utilise les GAM (Generalized Additive Models). Ce modèle est bon pour expliquer mais reste souvent moins performant pour prédire.
+
+```{r include = FALSE}
+#outlier_age <- boxplot.stats(train$yield_anomaly)$out
+#outlier_age
+#outlier_idx <- which(train$yield_anomaly %in% c(outlier_age))
+#outlier_idx
+#train <- train[-outlier_idx,]
+
+#y.train <- train[,3]
+#ntrain <- length(train$yield_anomaly)
+#ntest <- length(test$yield_anomaly)
+```
+
+```{r include=FALSE}
+library(gam)
+
+model <- gam(yield_anomaly ~ ns(X,df=5) + ns(year_harvest,df=5)+ ns(NUMD,df=5) + ns(IRR,df=5) + ns(ETP_1,df=5)+ ns(ETP_2,df=5)+ ns(ETP_3,df=5)+ ns(ETP_4,df=5)+ ns(ETP_5,df=5)+ ns(ETP_6,df=5)+ ns(ETP_7,df=5)+ ns(ETP_8,df=5)+ ns(ETP_9,df=5)+ ns(PR_1,df=5)+ ns(PR_2,df=5)+ ns(PR_3,df=5)+ ns(PR_4,df=5)+ ns(PR_5,df=5)+ ns(PR_6,df=5)+ ns(PR_7,df=5)+ ns(PR_8,df=5)+ ns(PR_9,df=5)+ ns(RV_1,df=5)+ ns(RV_2,df=5)+ ns(RV_3,df=5)+ ns(RV_4,df=5)+ ns(RV_5,df=5)+ ns(RV_6,df=5)+ ns(RV_7,df=5)+ ns(RV_8,df=5)+ ns(RV_9,df=5)+ ns(SeqPR_1,df=5)+ ns(SeqPR_2,df=5)+ ns(SeqPR_3,df=5)+ ns(SeqPR_4,df=5)+ ns(SeqPR_5,df=5)+ ns(SeqPR_6,df=5)+ ns(SeqPR_7,df=5)+ ns(SeqPR_8,df=5)+ ns(SeqPR_9,df=5)+ ns(Tn_1,df=5)+ ns(Tn_2,df=5)+ ns(Tn_3,df=5)+ ns(Tn_4,df=5)+ ns(Tn_5,df=5)+ ns(Tn_6,df=5)+ ns(Tn_7,df=5)+ ns(Tn_8,df=5)+ ns(Tn_9,df=5)+ ns(Tx_1,df=5)+ ns(Tx_2,df=5)+ ns(Tx_3,df=5)+ ns(Tx_4,df=5)+ ns(Tx_5,df=5)+ ns(Tx_6,df=5)+ ns(Tx_7,df=5)+ ns(Tx_8,df=5)+ ns(Tx_9,df=5), data = train)
+
+predict <- predict(model, test)
+error <- predict - test[["yield_anomaly"]]
+MSE <- mean(error^2)
+print(MSE)
+```
+
+```{r include=FALSE}
+model <- gam(yield_anomaly ~ ns(IRR,df=5) + ns(ETP_2,df=5)+ ns(ETP_3,df=5)+ ns(ETP_6,df=5)+ ns(ETP_7,df=5)+ ns(PR_4,df=5)+ ns(PR_5,df=5)+ ns(PR_6,df=5)+ ns(PR_7,df=5)+ ns(PR_8,df=5)+ ns(PR_9,df=5)+ ns(RV_2,df=5)+ ns(RV_6,df=5)+ ns(SeqPR_1,df=5)+ ns(SeqPR_2,df=5)+ ns(SeqPR_4,df=5)+ ns(SeqPR_9,df=5)+ ns(Tn_1,df=5)+ ns(Tn_3,df=5)+ ns(Tn_4,df=5)+ ns(Tn_5,df=5)+ ns(Tn_8,df=5)+ ns(Tx_2,df=5)+ ns(Tx_3,df=5), data = train)
+
+predict <- predict(model, test)
+error <- predict - test[["yield_anomaly"]]
+MSE <- mean(error^2)
+print(MSE)
+```
+
+```{r include=FALSE}
+model <- gam(yield_anomaly ~ ns(ETP_2,df=5)+ ns(ETP_3,df=5)+ ns(ETP_6,df=5)+ ns(ETP_7,df=5)+ns(ETP_8,df=5)+ ns(PR_4,df=5)+ ns(PR_5,df=5)+ ns(PR_7,df=5)+ ns(PR_9,df=5)+ ns(RV_2,df=5)+ ns(RV_6,df=5)+ ns(SeqPR_1,df=5)+  ns(SeqPR_4,df=5)+ ns(SeqPR_9,df=5)+ ns(Tn_5,df=5)+ ns(Tn_7,df=5)+ ns(Tx_2,df=5)+ ns(Tx_3,df=5)+ ns(Tx_4,df=5)+ ns(Tx_7,df=5), data = train)
+
+predict <- predict(model, test)
+error <- predict - test[["yield_anomaly"]]
+MSE <- mean(error^2)
+print(MSE)
+```
+Ainsi, on obtient : 
+
+|Model| GAM         | Résultat  |
+|-----|-------------|-----------|
+|     | DF          |    5      |
+| 1   | MSE         | 0.6822596 |
+| 2   | MSE         | 0.7300008 |
+| 3   | MSE         | 0.752631  | 
+
+Cependant si on enlèle les outliers, les autres modèles sont moins précis sauf les GAMs.
+
+|Model| GAM         | Résultat  |
+|-----|-------------|-----------|
+|     | DF          |    5      |
+| 1   | MSE         | 0.6498522 |
+| 2   | MSE         | 0.7221726 |
+| 3   | MSE         | 0.7463895 | 
+
+## SVR
+
+```{r include=FALSE}
+library(kernlab)
+library(MASS)
+set.seed(5)
+
+for (m in (1:length(models))) {
+  CC<-c(0.01,0.1,1,10,100,1000)
+  N<-length(CC)
+  err<-rep(0,N)
+  for(i in 1:N) {
+    err[i]<-cross(ksvm(models[[m]], data = train,kernel = "rbfdot",epsilon=0.1, C=CC[i], cross=5))
+  }
+  plot(CC,err,type="b",log="x",xlab="C",ylab="CV error")
+  
+  
+  svmfit <- ksvm(models[[m]], data = train ,kernel="rbfdot", C=CC[which.min(err)], epsilon=0.1)
+  predict <- predict(svmfit, test)
+  error <- predict - test[["yield_anomaly"]]
+  MSE <- mean(error^2)
+  print(MSE)
+}
+```
+On détermine par CV la valeur de C et on l'applique sur notre modèle afin de connaitre le MSE :
+
+|Model| SVR         | Résultat  |
+|-----|-------------|-----------|
+|     | C           |    1      |
+| 1   | MSE         | 0.5495835 |
+|     | C           |    1      |
+| 2   | MSE         | 0.5594924 |
+|     | C           |    1      |
+| 3   | MSE         | 0.5833493 | 
+
+## Neural network
+
+```{r include=FALSE}
+library(nnet)
+set.seed(5)
+
+
+for (m in (1:length(models))) {
+  lambda <- c(0,0.1,0.5,1,2,3,4,5,6,7,8,9,10)
+  N <- length(lambda)
+  error <- rep(0,N)
+  for (i in 1:N) {
+    nn <- nnet(models[[m]], data = train, size = 5, linout = TRUE, decay =lambda[i])
+    predict <- predict(nn, test)
+    err <- predict - test[["yield_anomaly"]]
+    error[i] <- mean(err^2)
+  }
+  plot(lambda,error,type="b",log="x",xlab="C",ylab="CV error")
+}
+
+nn <- nnet(models[[1]], data = train, size = 5, linout = TRUE, decay = 1)
+predict <- predict(nn, test)
+error <- predict - test[["yield_anomaly"]]
+MSE <- mean(error^2)
+print(MSE)
+  
+nn <- nnet(models[[2]], data = train, size = 5, linout = TRUE, decay = 10)
+predict <- predict(nn, test)
+error <- predict - test[["yield_anomaly"]]
+MSE <- mean(error^2)
+print(MSE)
+  
+nn <- nnet(models[[3]], data = train, size = 5, linout = TRUE, decay = 6)
+predict <- predict(nn, test)
+error <- predict - test[["yield_anomaly"]]
+MSE <- mean(error^2)
+print(MSE)
+```
+
+Dans un premier temps, nous avons utilisé le package *NNET* en optimisant le nombre de neuronnes cachés et en sélectionnant le lambda optimal par cross-validation.
+
+|Model| NNET        | Résultat  |
+|-----|-------------|-----------|
+|     | size        |    5      |
+| 1   | MSE         | 0.8002449 |
+|     | lambda      |    1      |
+| 2   | MSE         | 0.6861912 |
+|     | lambda      |    10     |
+| 3   | MSE         | 0.7372022 | 
+|     | lambda      |    6      |
+
+Nous allons utiliser à présent le package *Keras* qui offre plus de possibilités.
+
+```{r include = FALSE}
+#installation du package à partir du dépôt CRAN
+#install.packages(‘’keras’’)
+
+#chargement de la librairie
+library(keras)
+
+#installation de l’environnement
+#install_keras()
+
+build_model <- function() {
+  
+  model <- keras_model_sequential() %>%
+    layer_dense(units = 64, activation = "relu", input_shape = dim(train[,-3])[2]) %>%
+    layer_dense(units = 64 , activation = "relu")%>%
+    layer_dense(units = 1)
+  
+  model %>% compile(
+    loss = "mse",
+    optimizer = optimizer_rmsprop(),
+    metrics = list("mean_squared_error")
+  )
+  
+  model
+}
+
+model <- build_model()
+model %>% summary()
+
+# Display training progress by printing a single dot for each completed epoch.
+print_dot_callback <- callback_lambda(
+  on_epoch_end = function(epoch, logs) {
+    if (epoch %% 100 == 0) cat("\n")
+    cat(".")
+  }
+)    
+
+epochs <- 500
+
+# Fit the model and store training stats
+history <- model %>% fit(
+  as.matrix(train[,-3]),
+  train[,3],
+  epochs = epochs,
+  validation_split = 0.2,
+  verbose = 0,
+  callbacks = list(print_dot_callback)
+)
+
+library(ggplot2)
+
+plot(history, metrics = "mean_squared_error", smooth = FALSE) +
+  coord_cartesian(ylim = c(0, 5))
+
+early_stop <- callback_early_stopping(monitor = "val_loss", patience = 50)
+
+model <- build_model()
+history <- model %>% fit(
+  as.matrix(train[,-3]),
+  train[,3],
+  epochs = epochs,
+  validation_split = 0.2,
+  verbose = 0,
+  callbacks = list(early_stop, print_dot_callback)
+)
+
+
+
+c(loss, mse) %<-% (model %>% evaluate(as.matrix(test[,-3]),test[,3], verbose = 0))
+
+paste0("Mean squared error on test set: ", sprintf("%.2f", mse))
+
+test_predictions <- model %>% predict(as.matrix(test[,-3]))
+error <- test_predictions - test[["yield_anomaly"]]
+MSE <- mean(error^2)
+print(MSE)
+
+#Units
+#plot(c(1,5,10,20,30,40,50,60,70,80),c(1.023403,1.023442,0.8593711,0.8908342,0.9046455,0.9325962,0.9040027,#0.9365406,0.8923198,0.9399994),type="b",log="x",xlab="number of units",ylab="MSE")
+```
+```{r echo = FALSE}
+plot(history, metrics = "mean_squared_error", smooth = FALSE) +
+  coord_cartesian(xlim = c(0, 250), ylim = c(0, 5))
+```
+
+Dans un premier temps nous avons consideré un modèle de réseau de neuronne à 3 couches cachées. 
+Par la suite nous avons voulu adapter les différents paramètres : 
+Ce modèle à tendance à overfit les données d'entrainements. C'est pourquoi on a mis en place *kernel_regularizer = regularizer_l2(l=0.1))* qui permet de régulariser les données. Dans cette optique on utilise également la méthode d'early stop pour éviter au maximum les problèmes d'overfit.
+
+Concernant le nombre d'units, nous avons testé plusieurs valeurs, de 1 å 70. De plus, nous avons fait varié le nombre de couche, cependant, lorsque celui-ci est trop grand devient moins pertinent.
+
+| Deep NN     | Résultat  |
+|-------------|-----------|
+| MSE         | 0.8984264 |
+| couche      | (64,64,1) |
+| Regularisé  |    oui    |
+| MSE         | 0.7208582 |
+| couche      | (64,64,1) |
+| Regularisé  |    non    |
+
+#Conclusion 
+Après une étude de différents modèles en fonction de la structure de nos données, il se trouve que le modèle basé sur le SVR donne un MSE minimum de 0.5495835 pour le modèle sans sélection de colonnes. 
